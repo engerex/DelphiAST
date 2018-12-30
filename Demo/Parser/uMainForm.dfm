@@ -33,7 +33,7 @@ object MainForm: TMainForm
         Width = 50
       end>
   end
-  object CheckBox1: TCheckBox
+  object chkStringIntern: TCheckBox
     AlignWithMargins = True
     Left = 3
     Top = 350

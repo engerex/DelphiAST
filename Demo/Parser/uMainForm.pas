@@ -14,8 +14,8 @@ type
     MainMenu: TMainMenu;
     OpenDelphiUnit1: TMenuItem;
     OpenDialog: TOpenDialog;
-    StatusBar: TStatusBar;    
-    CheckBox1: TCheckBox;
+    StatusBar: TStatusBar;
+    chkStringIntern: TCheckBox;
     procedure OpenDelphiUnit1Click(Sender: TObject);  
   private
     procedure UpdateStatusBarText(const StatusText: string);
@@ -121,7 +121,7 @@ var
 begin 
   if OpenDialog.Execute then
   begin
-    OutputMemo.Lines.Text := Parse(OpenDialog.FileName, StatusText, CheckBox1.Checked);
+    OutputMemo.Lines.Text := Parse(OpenDialog.FileName, StatusText, chkStringIntern.Checked);
     UpdateStatusBarText(StatusText);
   end
 end;

@@ -23,8 +23,9 @@ type
 implementation
 
 uses
-  Generics.Collections,
-  DelphiAST.Consts, DelphiAST.Serialize.Binary;
+  Generics.Collections, DelphiAST.Consts,
+  {$ifdef USESTRINGCACHE}SimpleParser.StringCache,{$endif}
+  DelphiAST.Serialize.Binary;
 
 {$I SimpleParser.inc}
 {$IFDEF D18_NEWER}
@@ -67,7 +68,7 @@ class procedure TSyntaxTreeWriter.NodeToXML(const Builder: TStringBuilder;
   var
     HasChildren: Boolean;
     NewIndent: string;
-    Attr: TPair<TAttributeName, string>;
+    Attr: TPair<TAttributeName, TAttributeEntryValue>;
     ChildNode: TSyntaxNode;
   begin
     HasChildren := Node.HasChildren;
@@ -97,7 +98,13 @@ class procedure TSyntaxTreeWriter.NodeToXML(const Builder: TStringBuilder;
       Builder.Append(' value="' + XMLEncode(TValuedSyntaxNode(Node).Value) + '"');
 
     for Attr in Node.Attributes do
-      Builder.Append(' ' + AttributeNameStrings[Attr.Key] + '="' + XMLEncode(Attr.Value) + '"');
+      Builder.Append(' ' + AttributeNameStrings[Attr.Key] + '="'
+        {$ifdef USESTRINGCACHE}
+         + XMLEncode(TStringCache.Instance.Get(Attr.Value))
+        {$else}
+          + XMLEncode(Attr.Value)
+        {$endif}
+        + '"');
     if HasChildren then
       Builder.Append('>')
     else
