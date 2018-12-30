@@ -54,7 +54,11 @@ unit SimpleParser.Lexer;
 interface
 
 uses
-  SysUtils, Classes, Character, SimpleParser.Lexer.Types;
+  SysUtils, Classes, Character, 
+  {$IFDEF FPC}
+    Generics.Collections, 
+  {$ENDIF}
+  SimpleParser.Lexer.Types;
 
 var
   Identifiers: array[#0..#127] of ByteBool;
@@ -111,13 +115,14 @@ type
     FOnUnDefDirect: TDirectiveEvent;
     FDirectiveParamOrigin: PChar;
     FAsmCode: Boolean;
-    FDefines: TStrings;
+    FDefines: TArray<string>;
     FDefineStack: Integer;
     FTopDefineRec: PDefineRec;
     FUseDefines: Boolean;
+    FScopedEnums: Boolean;
     FIncludeHandler: IIncludeHandler;
     FOnComment: TCommentEvent;
-
+    
     function KeyHash: Integer;
     function KeyComp(const aKey: string): Boolean;
     function Func9: tptTokenKind;
@@ -252,9 +257,7 @@ type
     procedure UnknownProc;
     function GetToken: string;
     function GetTokenLen: Integer;
-    function GetCommentState: Pointer;
     function GetCompilerDirective: string;
-    procedure SetCommentState(const Value: Pointer);
     function GetDirectiveKind: TptTokenKind;
     function GetDirectiveParam: string;
     function GetStringContent: string;
@@ -269,7 +272,7 @@ type
     function GetIsRelativeOperator: Boolean;
     function GetIsCompilerDirective: Boolean;
     function GetIsOrdinalType: Boolean;
-    function GetGenID: TptTokenKind;procedure SetOnElseIfDirect(const Value: TDirectiveEvent);
+    function GetGenID: TptTokenKind;
 
     procedure EnterDefineBlock(ADefined: Boolean);
     procedure ExitDefineBlock;
@@ -277,6 +280,7 @@ type
     procedure DoProcTable(AChar: Char);
     function IsIdentifiers(AChar: Char): Boolean; inline;
     function HashValue(AChar: Char): Integer;
+    function EvaluateComparison(AValue1: Extended; const AOper: String; AValue2: Extended): Boolean;
     function EvaluateConditionalExpression(const AParams: String): Boolean;
     procedure IncludeFile;
     function GetIncludeFileNameFromToken(const IncludeToken: string): string;
@@ -286,20 +290,10 @@ type
     procedure SetSharedBuffer(SharedBuffer: PBufferRec);
     procedure DisposeBuffer(Buf: PBufferRec);
     function GetFileName: string;
+    procedure UpdateScopedEnums;
+    procedure DoOnComment(const CommentText: string);
   protected
     procedure SetOrigin(const NewValue: string); virtual;
-    procedure SetOnCompDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnDefineDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnElseDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnEndIfDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnIfDefDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnIfNDefDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnIfOptDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnIncludeDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnResourceDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnUnDefDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnIfDirect(const Value: TDirectiveEvent); virtual;
-    procedure SetOnIfEndDirect(const Value: TDirectiveEvent); virtual;
   public
     constructor Create;
     destructor Destroy; override;
@@ -317,7 +311,7 @@ type
     procedure ClearDefines;
     procedure InitDefinesDefinedByCompiler;
 
-    property CommentState: Pointer read GetCommentState write SetCommentState;
+    property Buffer: PBufferRec read FBuffer;
     property CompilerDirective: string read GetCompilerDirective;
     property DirectiveParam: string read GetDirectiveParam;
     property IsJunk: Boolean read GetIsJunk;
@@ -343,22 +337,23 @@ type
     property IsCompilerDirective: Boolean read GetIsCompilerDirective;
     property OnComment: TCommentEvent read FOnComment write FOnComment;
     property OnMessage: TMessageEvent read FOnMessage write FOnMessage;
-    property OnCompDirect: TDirectiveEvent read FOnCompDirect write SetOnCompDirect;
-    property OnDefineDirect: TDirectiveEvent read FOnDefineDirect write SetOnDefineDirect;
-    property OnElseDirect: TDirectiveEvent read FOnElseDirect write SetOnElseDirect;
-    property OnEndIfDirect: TDirectiveEvent read FOnEndIfDirect write SetOnEndIfDirect;
-    property OnIfDefDirect: TDirectiveEvent read FOnIfDefDirect write SetOnIfDefDirect;
-    property OnIfNDefDirect: TDirectiveEvent read FOnIfNDefDirect write SetOnIfNDefDirect;
-    property OnIfOptDirect: TDirectiveEvent read FOnIfOptDirect write SetOnIfOptDirect;
-    property OnIncludeDirect: TDirectiveEvent read FOnIncludeDirect write SetOnIncludeDirect;
-    property OnIfDirect: TDirectiveEvent read FOnIfDirect write SetOnIfDirect;
-    property OnIfEndDirect: TDirectiveEvent read FOnIfEndDirect write SetOnIfEndDirect;
-    property OnElseIfDirect: TDirectiveEvent read FOnElseIfDirect write SetOnElseIfDirect;
-    property OnResourceDirect: TDirectiveEvent read FOnResourceDirect write SetOnResourceDirect;
-    property OnUnDefDirect: TDirectiveEvent read FOnUnDefDirect write SetOnUnDefDirect;
+    property OnCompDirect: TDirectiveEvent read FOnCompDirect write FOnCompDirect;
+    property OnDefineDirect: TDirectiveEvent read FOnDefineDirect write FOnDefineDirect;
+    property OnElseDirect: TDirectiveEvent read FOnElseDirect write FOnElseDirect;
+    property OnEndIfDirect: TDirectiveEvent read FOnEndIfDirect write FOnEndIfDirect;
+    property OnIfDefDirect: TDirectiveEvent read FOnIfDefDirect write FOnIfDefDirect;
+    property OnIfNDefDirect: TDirectiveEvent read FOnIfNDefDirect write FOnIfNDefDirect;
+    property OnIfOptDirect: TDirectiveEvent read FOnIfOptDirect write FOnIfOptDirect;
+    property OnIncludeDirect: TDirectiveEvent read FOnIncludeDirect write FOnIncludeDirect;
+    property OnIfDirect: TDirectiveEvent read FOnIfDirect write FOnIfDirect;
+    property OnIfEndDirect: TDirectiveEvent read FOnIfEndDirect write FOnIfEndDirect;
+    property OnElseIfDirect: TDirectiveEvent read FOnElseIfDirect write FOnElseIfDirect;
+    property OnResourceDirect: TDirectiveEvent read FOnResourceDirect write FOnResourceDirect;
+    property OnUnDefDirect: TDirectiveEvent read FOnUnDefDirect write FOnUnDefDirect;
     property AsmCode: Boolean read FAsmCode write FAsmCode;
     property DirectiveParamOrigin: PChar read FDirectiveParamOrigin;
     property UseDefines: Boolean read FUseDefines write FUseDefines;
+    property ScopedEnums: Boolean read FScopedEnums;
     property IncludeHandler: IIncludeHandler read FIncludeHandler write FIncludeHandler;
     property FileName: string read GetFileName;
   end;
@@ -372,16 +367,6 @@ type
     function GetAheadTokenID: TptTokenKind;
   protected
     procedure SetOrigin(const NewValue: string); override;
-    procedure SetOnCompDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnDefineDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnElseDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnEndIfDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnIfDefDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnIfNDefDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnIfOptDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnIncludeDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnResourceDirect(const Value: TDirectiveEvent); override;
-    procedure SetOnUnDefDirect(const Value: TDirectiveEvent); override;
   public
     constructor Create;
     destructor Destroy; override;
@@ -440,7 +425,7 @@ begin
     FTopDefineRec := Frame^.Next;
     Dispose(Frame);
   end;
-  FDefines.Clear;
+  FDefines := nil;
   FDefineStack := 0;
 end;
 
@@ -449,7 +434,7 @@ var
   Frame, LastFrame, SourceFrame: PDefineRec;
 begin
   ClearDefines;
-  FDefines.Assign(ALexer.FDefines);
+  FDefines := Copy(ALexer.FDefines);
   FDefineStack := ALexer.FDefineStack;
 
   Frame := nil;
@@ -474,8 +459,8 @@ end;
 
 function TmwBasePasLex.GetPosXY: TTokenPoint;
 begin
-  Result.X := FTokenPos - FBuffer.LinePos + 1;
   Result.Y := FBuffer.LineNumber + 1;
+  Result.X := FTokenPos - FBuffer.LinePos + 1;
 end;
 
 function TmwBasePasLex.GetRunPos: Integer;
@@ -1307,7 +1292,7 @@ begin
   FExID := ptUnKnown;
 
   FUseDefines := True;
-  FDefines := TStringList.Create;
+  FScopedEnums := False;
   FTopDefineRec := nil;
   ClearDefines;
 
@@ -1323,7 +1308,6 @@ begin
   Dispose(FBuffer);
 
   ClearDefines; //If we don't do this, we get a memory leak
-  FDefines.Free;
   inherited Destroy;
 end;
 
@@ -1332,6 +1316,12 @@ begin
   if Assigned(Buf.Buf) and not Buf.SharedBuffer then
     FreeMem(Buf.Buf);
   Dispose(Buf);
+end;
+
+procedure TmwBasePasLex.DoOnComment(const CommentText: string);
+begin
+  if not FUseDefines or (FDefineStack = 0) then
+    FOnComment(Self, CommentText);
 end;
 
 procedure TmwBasePasLex.DoProcTable(AChar: Char);
@@ -1385,8 +1375,12 @@ begin
 end;
 
 procedure TmwBasePasLex.AddDefine(const ADefine: string);
+var
+  len: Integer;
 begin
-  FDefines.Add(ADefine);
+  len := Length(FDefines);
+  SetLength(FDefines, len + 1);
+  FDefines[len] := ADefine;
 end;
 
 procedure TmwBasePasLex.AddressOpProc;
@@ -1415,7 +1409,11 @@ begin
     while CharInSet(FBuffer.Buf[FBuffer.Run], ['0'..'9', 'A'..'F', 'a'..'f']) do Inc(FBuffer.Run);
   end else
   begin
+{$IFDEF SUPPORTS_INTRINSIC_HELPERS}
+    while Char(FBuffer.Buf[FBuffer.Run]).IsDigit do
+{$ELSE}
     while IsDigit(FBuffer.Buf[FBuffer.Run]) do
+{$ENDIF}
       Inc(FBuffer.Run);
   end;
 end;
@@ -1473,12 +1471,15 @@ begin
 
   if Assigned(FOnComment) then
   begin
-    SetString(CommentText, PChar(@FBuffer.Buf[BeginRun]), FBuffer.Run - BeginRun);
-    FOnComment(Self, CommentText);
+    SetString(CommentText, PChar(@FBuffer.Buf[BeginRun]), FBuffer.Run - BeginRun - 1);
+    DoOnComment(CommentText);
   end;
 end;
 
 procedure TmwBasePasLex.BraceOpenProc;
+var
+  BeginRun: Integer;
+  CommentText: string;
 begin
   case FBuffer.Buf[FBuffer.Run + 1] of
     '$': FTokenID := GetDirectiveKind;
@@ -1488,7 +1489,9 @@ begin
       FCommentState := csBor;
     end;
   end;
+
   Inc(FBuffer.Run);
+  BeginRun := FBuffer.Run;
   while FBuffer.Buf[FBuffer.Run] <> #0 do
     case FBuffer.Buf[FBuffer.Run] of
       '}':
@@ -1514,6 +1517,14 @@ begin
       Inc(FBuffer.Run);
     end;
   case FTokenID of
+    PtBorComment:
+      begin
+        if Assigned(FOnComment) then
+        begin
+          SetString(CommentText, PChar(@FBuffer.Buf[BeginRun]), FBuffer.Run - BeginRun - 1);
+          DoOnComment(CommentText);
+        end;
+      end;
     PtCompDirect:
       begin
         if Assigned(FOnCompDirect) then
@@ -1609,7 +1620,7 @@ begin
       begin
 //        if Assigned(FOnIncludeDirect) then
 //          FOnIncludeDirect(Self);
-        if Assigned(FIncludeHandler) then
+        if Assigned(FIncludeHandler) and (FDefineStack = 0) then
           IncludeFile
         else
           Next;
@@ -1619,6 +1630,10 @@ begin
         if Assigned(FOnResourceDirect) then
           FOnResourceDirect(Self);
       end;
+    PtScopedEnumsDirect:
+      begin
+        UpdateScopedEnums;
+      end;      
     PtUndefDirect:
       begin
         if FUseDefines and (FDefineStack = 0) then
@@ -1629,15 +1644,72 @@ begin
   end;
 end;
 
+function TmwBasePasLex.EvaluateComparison(AValue1: Extended; const AOper: String; AValue2: Extended): Boolean;
+begin
+  if AOper = '=' then
+    Result := AValue1 = AValue2
+  else if AOper = '<>' then
+    Result := AValue1 <> AValue2
+  else if AOper = '<' then
+    Result := AValue1 < AValue2
+  else if AOper = '<=' then
+    Result := AValue1 <= AValue2
+  else if AOper = '>' then
+    Result := AValue1 > AValue2
+  else if AOper = '>=' then
+    Result := AValue1 >= AValue2
+  else
+    Result := False;
+end;
+
 function TmwBasePasLex.EvaluateConditionalExpression(const AParams: String): Boolean;
 var
   LParams: String;
   LDefine: String;
   LEvaluation: TmwPasLexExpressionEvaluation;
+  LIsComVer: Boolean;
+  LIsRtlVer: Boolean;
+  LOper: string;
+  LValue: Integer;
+  p: Integer;
 begin
   { TODO : Expand support for <=> evaluations (complicated to do). Expand support for NESTED expressions }
   LEvaluation := leeNone;
   LParams := TrimLeft(AParams);
+  LIsComVer := Pos('COMPILERVERSION', LParams) = 1;
+  LIsRtlVer := Pos('RTLVERSION', LParams) = 1;
+  if LIsComVer or LIsRtlVer then //simple parser which covers most frequent use cases
+  begin
+    Result := False;
+    if LIsComVer then
+      Delete(LParams, 1, Length('COMPILERVERSION'));
+    if LIsRtlVer then
+      Delete(LParams, 1, Length('RTLVERSION'));
+    while (LParams <> '') and (LParams[1] = ' ') do
+      Delete(LParams, 1, 1);
+    p := Pos(' ', LParams);
+    if p > 0 then
+    begin
+      LOper := Copy(LParams, 1, p-1);
+      Delete(LParams, 1, p);
+      while (LParams <> '') and (LParams[1] = ' ') do
+        Delete(LParams, 1, 1);
+      p := Pos(' ', LParams);
+      if p = 0 then
+        p := Length(LParams) + 1;
+      if TryStrToInt(Copy(LParams, 1, p-1), LValue) then
+      begin
+        Delete(LParams, 1, p);
+        while (LParams <> '') and (LParams[1] = ' ') do
+          Delete(LParams, 1, 1);
+        if LParams = '' then
+          if LIsComVer then
+            Result := EvaluateComparison(CompilerVersion, LOper, LValue)
+          else if LIsRtlVer then
+            Result := EvaluateComparison(RTLVersion, LOper, LValue);
+      end;
+    end;
+  end else
   if (Pos('DEFINED(', LParams) = 1) or (Pos('NOT DEFINED(', LParams) = 1) then
   begin
     Result := True; // Optimistic
@@ -1750,6 +1822,7 @@ begin
     Dispose(StackFrame);
   end;
 end;
+
 procedure TmwBasePasLex.GreaterProc;
 begin
   case FBuffer.Buf[FBuffer.Run + 1] of
@@ -1788,8 +1861,13 @@ begin
 end;
 
 function TmwBasePasLex.IsDefined(const ADefine: string): Boolean;
+var
+  i: Integer;
 begin
-  Result := FDefines.IndexOf(ADefine) > -1;
+  for i := 0 to High(FDefines) do
+    if SameText(FDefines[i], ADefine) then
+      Exit(True);
+  Result := False;
 end;
 
 function TmwBasePasLex.IsIdentifiers(AChar: Char): Boolean;
@@ -1918,13 +1996,29 @@ begin
   end;
 end;
 
+procedure Delete(var values: TArray<string>; index: Integer);
+var
+  len: Integer;
+  tailCount: Integer;
+begin
+  len := Length(values);
+  if len = 0 then
+    Exit;
+  values[index] := '';
+  tailCount := len - (index + 1);
+  if tailCount > 0 then
+    Move(values[index + 1], values[index], SizeOf(string) * tailCount);
+  Pointer(values[len - 1]) := nil; // do not trigger string refcounting as we moved it
+  SetLength(values, len - 1);
+end;
+
 procedure TmwBasePasLex.RemoveDefine(const ADefine: string);
 var
-  I: Integer;
+  i: Integer;
 begin
-  I := FDefines.IndexOf(ADefine);
-  if I > -1 then
-    FDefines.Delete(I);
+  for i := High(FDefines) downto 0 do
+    if SameText(FDefines[i], ADefine) then
+      Delete(FDefines, i);
 end;
 
 procedure TmwBasePasLex.RoundCloseProc;
@@ -1949,7 +2043,7 @@ begin
       end;
   end;
 
-  BeginRun := FBuffer.Run;
+  BeginRun := FBuffer.Run + 1;
 
   while FBuffer.Buf[FBuffer.Run] <> #0 do
     case FBuffer.Buf[FBuffer.Run] of
@@ -1980,13 +2074,17 @@ begin
 
   if Assigned(FOnComment) then
   begin
-    SetString(CommentText, PChar(@FBuffer.Buf[BeginRun]), FBuffer.Run - BeginRun);
-    FOnComment(Self, CommentText);
+    SetString(CommentText, PChar(@FBuffer.Buf[BeginRun]), FBuffer.Run - BeginRun - 2);
+    DoOnComment(CommentText);
   end;
 end;
 
 procedure TmwBasePasLex.RoundOpenProc;
+var
+  BeginRun: Integer;
+  CommentText: string;
 begin
+  BeginRun := FBuffer.Run + 2;
   Inc(FBuffer.Run);
   case FBuffer.Buf[FBuffer.Run] of
     '*':
@@ -2034,6 +2132,14 @@ begin
     FTokenID := ptRoundOpen;
   end;
   case FTokenID of
+    PtAnsiComment:
+      begin
+        if Assigned(FOnComment) then
+        begin
+          SetString(CommentText, PChar(@FBuffer.Buf[BeginRun]), FBuffer.Run - BeginRun - 2);
+          DoOnComment(CommentText);
+        end;
+      end;
     PtCompDirect:
       begin
         if Assigned(FOnCompDirect) then
@@ -2071,8 +2177,6 @@ begin
       end;
     PtIncludeDirect:
       begin
-//        if Assigned(FOnIncludeDirect) then
-//          FOnIncludeDirect(Self);
         if Assigned(FIncludeHandler) then
           IncludeFile;
       end;
@@ -2081,6 +2185,10 @@ begin
         if Assigned(FOnResourceDirect) then
           FOnResourceDirect(Self);
       end;
+    PtScopedEnumsDirect:
+      begin
+        UpdateScopedEnums;
+      end;      
     PtUndefDirect:
       begin
         if Assigned(FOnUnDefDirect) then
@@ -2119,7 +2227,7 @@ begin
         if Assigned(FOnComment) then
         begin
           SetString(CommentText, PChar(@FBuffer.Buf[BeginRun]), FBuffer.Run - BeginRun);
-          FOnComment(Self, CommentText);
+          DoOnComment(CommentText);
         end;
       end;
   else
@@ -2224,7 +2332,7 @@ end;
 
 function TmwBasePasLex.GetToken: string;
 begin
-  SetString(Result, (FBuffer.Buf + FTokenPos), GetTokenLen);
+  SetString(Result, FBuffer.Buf + FTokenPos, TokenLen);
 end;
 
 function TmwBasePasLex.GetTokenLen: Integer;
@@ -2265,11 +2373,6 @@ begin
       Exit;
     end;
   end;
-end;
-
-function TmwBasePasLex.GetCommentState: Pointer;
-begin
-  Result := Pointer(FCommentState);
 end;
 
 function TmwBasePasLex.GetCompilerDirective: string;
@@ -2363,6 +2466,10 @@ begin
       if KeyComp('Resource') then
         Result := ptResourceDirect else
         Result := ptCompDirect;
+    134:
+      if KeyComp('SCOPEDENUMS') then
+        Result := ptScopedEnumsDirect else
+        Result := ptCompDirect;        
   else Result := ptCompDirect;
   end;
   FTokenPos := TempPos;
@@ -2463,6 +2570,7 @@ procedure TmwBasePasLex.InitFrom(ALexer: TmwBasePasLex);
 begin
   SetSharedBuffer(ALexer.FBuffer);
   FCommentState := ALexer.FCommentState;
+  FScopedEnums := ALexer.ScopedEnums;
   FBuffer.Run := ALexer.RunPos;
   FTokenID := ALexer.TokenID;
   FExID := ALexer.ExID;
@@ -2538,6 +2646,12 @@ begin
   {$IFDEF VER300} // Seattle
   AddDefine('VER300');
   {$ENDIF}
+  {$IFDEF VER310} // Berlin
+  AddDefine('VER310');
+  {$ENDIF}
+  {$IFDEF VER320} // Tokyo
+  AddDefine('VER320');
+  {$ENDIF}
   {$IFDEF WIN32}
   AddDefine('WIN32');
   {$ENDIF}
@@ -2550,6 +2664,9 @@ begin
   {$IFDEF LINUX32}
   AddDefine('LINUX32');
   {$ENDIF}
+  {$IFDEF LINUX64}
+  AddDefine('LINUX64');
+  {$ENDIF}
   {$IFDEF POSIX}
   AddDefine('POSIX');
   {$ENDIF}
@@ -2559,6 +2676,12 @@ begin
   {$IFDEF CPUARM}
   AddDefine('CPUARM');
   {$ENDIF}
+  {$IFDEF CPUARM32}
+  AddDefine('CPUARM32');
+  {$ENDIF}
+  {$IFDEF CPUARM64}
+  AddDefine('CPUARM64');
+  {$ENDIF}
   {$IFDEF CPU386}
   AddDefine('CPU386');
   {$ENDIF}
@@ -2567,6 +2690,12 @@ begin
   {$ENDIF}
   {$IFDEF CPUX64}
   AddDefine('CPUX64');
+  {$ENDIF}
+  {$IFDEF CPU32BITS}
+  AddDefine('CPU32BITS');
+  {$ENDIF}
+  {$IFDEF CPU64BITS}
+  AddDefine('CPU64BITS');
   {$ENDIF}
   {$IFDEF MSWINDOWS}
   AddDefine('MSWINDOWS');
@@ -2580,8 +2709,14 @@ begin
   {$IFDEF IOS}
   AddDefine('IOS');
   {$ENDIF}
+  {$IFDEF IOS32}
+  AddDefine('IOS32');
+  {$ENDIF}
   {$IFDEF ANDROID}
   AddDefine('ANDROID');
+  {$ENDIF}
+  {$IFDEF ANDROID32}
+  AddDefine('ANDROID32');
   {$ENDIF}
   {$IFDEF CONSOLE}
   AddDefine('CONSOLE');
@@ -2597,6 +2732,9 @@ begin
   {$ENDIF}
   {$IFDEF ALIGN_STACK}
   AddDefine('ALIGN_STACK');
+  {$ENDIF}
+  {$IFDEF ARM_NO_VFP_USE}
+  AddDefine('ARM_NO_VFP_USE');
   {$ENDIF}
   {$IFDEF ASSEMBLER}
   AddDefine('ASSEMBLER');
@@ -2628,14 +2766,9 @@ begin
   {$IFDEF WEAKINSTREF}
   AddDefine('WEAKINSTREF');
   {$ENDIF}
-  {$IFDEF WEAKINTREF}
-  AddDefine('WEAKINTREF');
+  {$IFDEF WEAKINTFREF}
+  AddDefine('WEAKINTFREF');
   {$ENDIF}
-end;
-
-procedure TmwBasePasLex.SetCommentState(const Value: Pointer);
-begin
-  FCommentState := TCommentState(Value);
 end;
 
 function TmwBasePasLex.GetStringContent: string;
@@ -2657,10 +2790,11 @@ end;
 
 function TmwBasePasLex.GetIsOrdIdent: Boolean;
 begin
-  Result := False;
   if FTokenID = ptIdentifier then
     Result := FExID in [ptBoolean, ptByte, ptChar, ptDWord, ptInt64, ptInteger,
-      ptLongInt, ptLongWord, ptPChar, ptShortInt, ptSmallInt, ptWideChar, ptWord];
+      ptLongInt, ptLongWord, ptPChar, ptShortInt, ptSmallInt, ptWideChar, ptWord]
+  else
+    Result := False;
 end;
 
 function TmwBasePasLex.GetIsOrdinalType: Boolean;
@@ -2670,28 +2804,26 @@ end;
 
 function TmwBasePasLex.GetIsRealType: Boolean;
 begin
-  Result := False;
   if FTokenID = ptIdentifier then
-    Result := FExID in [ptComp, ptCurrency, ptDouble, ptExtended, ptReal, ptReal48, ptSingle];
+    Result := FExID in [ptComp, ptCurrency, ptDouble, ptExtended, ptReal, ptReal48, ptSingle]
+  else
+    Result := False;
 end;
 
 function TmwBasePasLex.GetIsStringType: Boolean;
 begin
-  Result := False;
   if FTokenID = ptIdentifier then
     Result := FExID in [ptAnsiString, ptWideString]
   else
-    if FTokenID = ptString then
-      Result := True
-    else
-      if FTokenID = ptStringConst then Result := True;
+    Result := FTokenID in [ptString, ptStringConst];
 end;
 
 function TmwBasePasLex.GetIsVariantType: Boolean;
 begin
-  Result := False;
   if FTokenID = ptIdentifier then
     Result := FExID in [ptOleVariant, ptVariant]
+  else
+    Result := False;
 end;
 
 function TmwBasePasLex.GetOrigin: string;
@@ -2719,7 +2851,7 @@ function TmwBasePasLex.GetIsCompilerDirective: Boolean;
 begin
   Result := FTokenID in [ptCompDirect, ptDefineDirect, ptElseDirect,
     ptEndIfDirect, ptIfDefDirect, ptIfNDefDirect, ptIfOptDirect,
-    ptIncludeDirect, ptResourceDirect, ptUndefDirect];
+    ptIncludeDirect, ptResourceDirect, ptScopedEnumsDirect, ptUndefDirect];
 end;
 
 function TmwBasePasLex.GetGenID: TptTokenKind;
@@ -2770,128 +2902,13 @@ end;
 
 procedure TmwPasLex.InitAhead;
 begin
-  FAheadLex.CommentState := CommentState;
+  FAheadLex.FCommentState := FCommentState;
   FAheadLex.CloneDefinesFrom(Self);
 
   FAheadLex.SetSharedBuffer(FBuffer);
 
   while FAheadLex.IsJunk do
     FAheadLex.Next;
-end;
-
-procedure TmwBasePasLex.SetOnCompDirect(const Value: TDirectiveEvent);
-begin
-  FOnCompDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnDefineDirect(const Value: TDirectiveEvent);
-begin
-  FOnDefineDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnElseDirect(const Value: TDirectiveEvent);
-begin
-  FOnElseDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnElseIfDirect(const Value: TDirectiveEvent);
-begin
-  FOnElseIfDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnEndIfDirect(const Value: TDirectiveEvent);
-begin
-  FOnEndIfDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnIfDefDirect(const Value: TDirectiveEvent);
-begin
-  FOnIfDefDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnIfDirect(const Value: TDirectiveEvent);
-begin
-  FOnIfDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnIfEndDirect(const Value: TDirectiveEvent);
-begin
-  FOnIfEndDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnIfNDefDirect(const Value: TDirectiveEvent);
-begin
-  FOnIfNDefDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnIfOptDirect(const Value: TDirectiveEvent);
-begin
-  FOnIfOptDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnIncludeDirect(const Value: TDirectiveEvent);
-begin
-  FOnIncludeDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnResourceDirect(const Value: TDirectiveEvent);
-begin
-  FOnResourceDirect := Value;
-end;
-
-procedure TmwBasePasLex.SetOnUnDefDirect(const Value: TDirectiveEvent);
-begin
-  FOnUnDefDirect := Value;
-end;
-
-procedure TmwPasLex.SetOnCompDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnDefineDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnElseDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnEndIfDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnIfDefDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnIfNDefDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnIfOptDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnIncludeDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnResourceDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
-end;
-
-procedure TmwPasLex.SetOnUnDefDirect(const Value: TDirectiveEvent);
-begin
-  inherited;
 end;
 
 procedure TmwPasLex.SetOrigin(const NewValue: string);
@@ -2938,12 +2955,16 @@ procedure TmwBasePasLex.AmpersandOpProc;
 begin
   FTokenID := ptAmpersand;
   Inc(FBuffer.Run);
-  while CharInSet(FBuffer.Buf[FBuffer.Run], ['a'..'z', 'A'..'Z','0'..'9', '_']) do
+  while CharInSet(FBuffer.Buf[FBuffer.Run], ['a'..'z', 'A'..'Z','0'..'9', '_', '&']) do
     Inc(FBuffer.Run);
   FTokenID := ptIdentifier;
+end;
+
+procedure TmwBasePasLex.UpdateScopedEnums;
+begin
+  FScopedEnums := SameText(DirectiveParam, 'ON');
 end;
 
 initialization
   MakeIdentTable;
 end.
-

@@ -47,9 +47,11 @@
 *.projdata
 *.tvsconfig
 *.dsk
+*.stat
 
 # Delphi history and backups
 __history/
+__recovery/
 *.~*
 
 # =========================
@@ -95,3 +97,4 @@ $RECYCLE.BIN/
 *.ppu
 *.o
 *.compiled
+
